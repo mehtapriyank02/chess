@@ -1,5 +1,53 @@
 <!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Royal Chess</title><link rel="stylesheet" href="style.css"></head>
-<body><div class="wrap"><h1>Royal Chess</h1><div id="board" class="board"></div></div>
-<script src="script.js"></script></body></html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="description"
+    content="Royal Chess game with legal chess rules and Stockfish AI."
+  >
+
+  <title>Royal Chess</title>
+
+  <link
+    rel="stylesheet"
+    href="style.css"
+  >
+</head>
+
+<body>
+  <main class="page-container">
+    <header class="page-header">
+      <div class="brand">
+        <div class="brand-icon">♚</div>
+
+        <div>
+          <h1>Royal Chess</h1>
+          <p>Play chess against Stockfish AI or another player</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="game-container">
+      <div
+        id="board"
+        aria-label="Chessboard"
+      ></div>
+    </section>
+
+    <noscript>
+      <div class="noscript-message">
+        JavaScript is required to run this chess game.
+      </div>
+    </noscript>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
