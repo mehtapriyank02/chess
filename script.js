@@ -4,7 +4,11 @@
   const CHESS_JS_URL =
     "https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js";
 
-  const STOCKFISH_FILE = "stockfish-18-lite-single.js";
+  const STOCKFISH_JS_URL =
+  "https://unpkg.com/stockfish@18.0.8/bin/stockfish-18-lite-single.js";
+
+const STOCKFISH_WASM_URL =
+  "https://unpkg.com/stockfish@18.0.8/bin/stockfish-18-lite-single.wasm";
 
   const PIECES = {
     w: {
