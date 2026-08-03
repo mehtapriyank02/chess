@@ -4,19 +4,44 @@
   const CHESS_JS_URL =
     "https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js";
 
-  const STOCKFISH_PATH = "stockfish-18-lite-single.js";
+  const STOCKFISH_FILE = "stockfish-18-lite-single.js";
 
   const PIECES = {
-    w: { k: "♔", q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" },
-    b: { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" },
+    w: {
+      k: "♔",
+      q: "♕",
+      r: "♖",
+      b: "♗",
+      n: "♘",
+      p: "♙",
+    },
+    b: {
+      k: "♚",
+      q: "♛",
+      r: "♜",
+      b: "♝",
+      n: "♞",
+      p: "♟",
+    },
+  };
+
+  const PIECE_NAMES = {
+    p: "pawn",
+    n: "knight",
+    b: "bishop",
+    r: "rook",
+    q: "queen",
+    k: "king",
   };
 
   let game;
   let selectedSquare = null;
-  let legalTargets = [];
+  let legalMoves = [];
   let boardFlipped = false;
+
   let aiEnabled = true;
   let aiThinking = false;
+
   let stockfish = null;
   let stockfishReady = false;
   let pendingEngineMove = false;
@@ -25,47 +50,52 @@
 
   if (!board) {
     document.body.innerHTML =
-      '<p style="font-family:Arial;padding:20px">Missing <code>&lt;div id="board"&gt;&lt;/div&gt;</code> in index.html.</p>';
+      '<p style="padding:20px;font-family:Arial">The chessboard element is missing from index.html.</p>';
     return;
   }
 
-  function loadScript(src) {
+  function loadExternalScript(source) {
     return new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = src;
+
+      script.src = source;
       script.onload = resolve;
       script.onerror = reject;
+
       document.head.appendChild(script);
     });
   }
 
-  async function start() {
+  async function initializeGame() {
     try {
       if (typeof window.Chess === "undefined") {
-        await loadScript(CHESS_JS_URL);
+        await loadExternalScript(CHESS_JS_URL);
       }
 
       game = new window.Chess();
 
-      buildInterface();
+      createGameInterface();
       initializeStockfish();
-      render();
+      renderEverything();
     } catch (error) {
       console.error(error);
 
-      board.innerHTML =
-        '<p style="padding:20px">Could not load chess.js. Check your internet connection and refresh.</p>';
+      board.innerHTML = `
+        <div style="padding:20px">
+          The chess rules library could not load.
+          Check your internet connection and refresh the page.
+        </div>
+      `;
     }
   }
 
-  function buildInterface() {
-    injectStyles();
-
+  function createGameInterface() {
     const wrapper = document.createElement("div");
     wrapper.className = "chess-app";
 
-    const boardParent = board.parentElement;
-    boardParent.insertBefore(wrapper, board);
+    const parent = board.parentElement;
+
+    parent.insertBefore(wrapper, board);
     wrapper.appendChild(board);
 
     board.className = "chess-board";
@@ -74,7 +104,7 @@
     panel.className = "game-panel";
 
     panel.innerHTML = `
-      <h2>Royal Chess</h2>
+      <h2>Game Controls</h2>
 
       <div class="status-card">
         <div id="gameStatus">White to move</div>
@@ -83,266 +113,110 @@
 
       <label class="control-label">
         Game mode
+
         <select id="gameMode">
-          <option value="ai">Play versus computer</option>
-          <option value="local">Two players</option>
+          <option value="computer">
+            Play against computer
+          </option>
+
+          <option value="local">
+            Two players
+          </option>
         </select>
       </label>
 
       <label class="control-label">
-        AI difficulty
+        Computer difficulty
+
         <select id="difficulty">
-          <option value="3">Beginner</option>
-          <option value="6" selected>Easy</option>
-          <option value="9">Medium</option>
-          <option value="12">Hard</option>
-          <option value="15">Expert</option>
+          <option value="2">
+            Beginner
+          </option>
+
+          <option value="5" selected>
+            Easy
+          </option>
+
+          <option value="8">
+            Medium
+          </option>
+
+          <option value="11">
+            Hard
+          </option>
+
+          <option value="14">
+            Expert
+          </option>
+
+          <option value="17">
+            Master
+          </option>
         </select>
       </label>
 
       <div class="button-grid">
-        <button id="newGame">New game</button>
-        <button id="undoMove">Undo</button>
-        <button id="flipBoard">Flip board</button>
-        <button id="copyPgn">Copy PGN</button>
+        <button id="newGameButton">
+          New Game
+        </button>
+
+        <button id="undoButton">
+          Undo
+        </button>
+
+        <button id="flipButton">
+          Flip Board
+        </button>
+
+        <button id="copyPgnButton">
+          Copy PGN
+        </button>
       </div>
 
-      <h3>Move history</h3>
-      <div id="moveHistory" class="move-history">No moves yet</div>
+      <h3>Move History</h3>
+
+      <div
+        id="moveHistory"
+        class="move-history"
+      >
+        No moves yet
+      </div>
     `;
 
     wrapper.appendChild(panel);
 
     document
       .getElementById("gameMode")
-      .addEventListener("change", (event) => {
-        aiEnabled = event.target.value === "ai";
-        newGame();
-      });
+      .addEventListener("change", handleGameModeChange);
 
     document
       .getElementById("difficulty")
-      .addEventListener("change", () => {
-        if (stockfishReady) {
-          configureStockfish();
-        }
-      });
+      .addEventListener("change", configureStockfish);
 
     document
-      .getElementById("newGame")
-      .addEventListener("click", newGame);
+      .getElementById("newGameButton")
+      .addEventListener("click", startNewGame);
 
     document
-      .getElementById("undoMove")
+      .getElementById("undoButton")
       .addEventListener("click", undoMove);
 
     document
-      .getElementById("flipBoard")
-      .addEventListener("click", () => {
-        boardFlipped = !boardFlipped;
-        renderBoard();
-      });
+      .getElementById("flipButton")
+      .addEventListener("click", flipBoard);
 
     document
-      .getElementById("copyPgn")
+      .getElementById("copyPgnButton")
       .addEventListener("click", copyPgn);
   }
 
-  function injectStyles() {
-    const style = document.createElement("style");
+  function handleGameModeChange(event) {
+    aiEnabled = event.target.value === "computer";
 
-    style.textContent = `
-      .chess-app {
-        display: flex;
-        gap: 24px;
-        align-items: flex-start;
-        justify-content: center;
-        flex-wrap: wrap;
-        width: min(100%, 1050px);
-        margin: 0 auto;
-      }
-
-      .chess-board {
-        width: min(82vw, 560px);
-        aspect-ratio: 1;
-        display: grid;
-        grid-template-columns: repeat(8, 1fr);
-        border: 6px solid #342e2a;
-        border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
-      }
-
-      .chess-square {
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 0;
-        padding: 0;
-        cursor: pointer;
-        font-size: clamp(30px, 7vw, 58px);
-        line-height: 1;
-        user-select: none;
-      }
-
-      .chess-square.light {
-        background: #f0d9b5;
-      }
-
-      .chess-square.dark {
-        background: #b58863;
-      }
-
-      .chess-square.selected {
-        box-shadow: inset 0 0 0 5px rgba(255, 226, 92, 0.9);
-      }
-
-      .chess-square.legal::after {
-        content: "";
-        position: absolute;
-        width: 24%;
-        height: 24%;
-        border-radius: 50%;
-        background: rgba(30, 30, 30, 0.32);
-      }
-
-      .chess-square.capture::after {
-        content: "";
-        position: absolute;
-        inset: 8%;
-        border-radius: 50%;
-        border: 5px solid rgba(110, 20, 20, 0.45);
-      }
-
-      .chess-square.last-move {
-        background-image: linear-gradient(
-          rgba(255, 235, 59, 0.28),
-          rgba(255, 235, 59, 0.28)
-        );
-      }
-
-      .piece {
-        position: relative;
-        z-index: 2;
-        filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.28));
-      }
-
-      .coordinate {
-        position: absolute;
-        font: bold 11px Arial, sans-serif;
-        opacity: 0.75;
-        z-index: 3;
-      }
-
-      .coordinate.file {
-        right: 4px;
-        bottom: 2px;
-      }
-
-      .coordinate.rank {
-        left: 4px;
-        top: 2px;
-      }
-
-      .game-panel {
-        width: min(88vw, 330px);
-        background: #262626;
-        color: #ffffff;
-        padding: 22px;
-        border-radius: 14px;
-        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.25);
-        font-family: Arial, sans-serif;
-      }
-
-      .game-panel h2 {
-        margin: 0 0 16px;
-      }
-
-      .game-panel h3 {
-        margin-bottom: 8px;
-      }
-
-      .status-card {
-        padding: 14px;
-        margin-bottom: 16px;
-        background: #171717;
-        border-radius: 9px;
-      }
-
-      #gameStatus {
-        font-weight: 700;
-        margin-bottom: 5px;
-      }
-
-      #engineStatus {
-        color: #bdbdbd;
-      }
-
-      .control-label {
-        display: block;
-        margin: 12px 0;
-        font-size: 13px;
-        color: #d7d7d7;
-      }
-
-      .control-label select {
-        display: block;
-        width: 100%;
-        margin-top: 6px;
-        padding: 10px;
-        border: 0;
-        border-radius: 7px;
-      }
-
-      .button-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 9px;
-        margin-top: 16px;
-      }
-
-      .button-grid button {
-        padding: 10px;
-        border: 0;
-        border-radius: 7px;
-        cursor: pointer;
-        font-weight: 700;
-      }
-
-      .move-history {
-        max-height: 220px;
-        overflow-y: auto;
-        background: #171717;
-        border-radius: 8px;
-        padding: 12px;
-        line-height: 1.7;
-        font-size: 14px;
-      }
-
-      @media (max-width: 760px) {
-        body {
-          padding: 16px !important;
-        }
-
-        .chess-app {
-          gap: 16px;
-        }
-
-        .chess-board {
-          width: min(92vw, 560px);
-        }
-
-        .game-panel {
-          width: min(92vw, 560px);
-        }
-      }
-    `;
-
-    document.head.appendChild(style);
+    startNewGame();
   }
 
-  function getDisplaySquares() {
+  function getDisplayedSquares() {
     const files = boardFlipped
       ? ["h", "g", "f", "e", "d", "c", "b", "a"]
       : ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -362,96 +236,145 @@
     return squares;
   }
 
-  function render() {
+  function renderEverything() {
     renderBoard();
-    renderStatus();
-    renderHistory();
+    renderGameStatus();
+    renderMoveHistory();
   }
 
   function renderBoard() {
     board.innerHTML = "";
 
-    const squares = getDisplaySquares();
-    const history = game.history({ verbose: true });
-    const lastMove = history.length
-      ? history[history.length - 1]
-      : null;
+    const displayedSquares = getDisplayedSquares();
+    const history = game.history({
+      verbose: true,
+    });
 
-    squares.forEach((square, index) => {
-      const fileIndex = index % 8;
-      const rankIndex = Math.floor(index / 8);
-      const light = (fileIndex + rankIndex) % 2 === 0;
+    const lastMove =
+      history.length > 0
+        ? history[history.length - 1]
+        : null;
+
+    displayedSquares.forEach((square, index) => {
+      const visualFile = index % 8;
+      const visualRank = Math.floor(index / 8);
+
+      const isLightSquare =
+        (visualFile + visualRank) % 2 === 0;
 
       const piece = game.get(square);
 
-      const legalMove = legalTargets.find(
+      const legalMove = legalMoves.find(
         (move) => move.to === square
       );
 
-      const element = document.createElement("button");
+      const squareElement =
+        document.createElement("button");
 
-      element.type = "button";
-      element.className =
-        `chess-square ${light ? "light" : "dark"}`;
+      squareElement.type = "button";
 
-      element.dataset.square = square;
-      element.setAttribute("aria-label", square);
+      squareElement.className =
+        `chess-square ${
+          isLightSquare ? "light" : "dark"
+        }`;
+
+      squareElement.dataset.square = square;
+
+      squareElement.setAttribute(
+        "aria-label",
+        createSquareDescription(square, piece)
+      );
 
       if (selectedSquare === square) {
-        element.classList.add("selected");
+        squareElement.classList.add("selected");
       }
 
       if (legalMove) {
-        element.classList.add(piece ? "capture" : "legal");
+        squareElement.classList.add(
+          piece ? "capture" : "legal"
+        );
       }
 
       if (
         lastMove &&
-        (lastMove.from === square || lastMove.to === square)
+        (
+          lastMove.from === square ||
+          lastMove.to === square
+        )
       ) {
-        element.classList.add("last-move");
+        squareElement.classList.add("last-move");
       }
 
       if (piece) {
-        const span = document.createElement("span");
-        span.className = "piece";
-        span.textContent = PIECES[piece.color][piece.type];
-        element.appendChild(span);
+        const pieceElement =
+          document.createElement("span");
+
+        pieceElement.className = "piece";
+        pieceElement.textContent =
+          PIECES[piece.color][piece.type];
+
+        squareElement.appendChild(pieceElement);
       }
 
-      addCoordinates(
-        element,
+      addBoardCoordinates(
+        squareElement,
         square,
-        fileIndex,
-        rankIndex
+        visualFile,
+        visualRank
       );
 
-      element.addEventListener("click", () => {
-        handleSquareClick(square);
-      });
+      squareElement.addEventListener(
+        "click",
+        () => handleSquareClick(square)
+      );
 
-      board.appendChild(element);
+      board.appendChild(squareElement);
     });
   }
 
-  function addCoordinates(
-    element,
-    square,
-    fileIndex,
-    rankIndex
-  ) {
-    if (fileIndex === 0) {
-      const rank = document.createElement("span");
-      rank.className = "coordinate rank";
-      rank.textContent = square[1];
-      element.appendChild(rank);
+  function createSquareDescription(square, piece) {
+    if (!piece) {
+      return `${square}, empty square`;
     }
 
-    if (rankIndex === 7) {
-      const file = document.createElement("span");
-      file.className = "coordinate file";
-      file.textContent = square[0];
-      element.appendChild(file);
+    const color =
+      piece.color === "w"
+        ? "White"
+        : "Black";
+
+    return `${square}, ${color} ${
+      PIECE_NAMES[piece.type]
+    }`;
+  }
+
+  function addBoardCoordinates(
+    element,
+    square,
+    visualFile,
+    visualRank
+  ) {
+    if (visualFile === 0) {
+      const rankLabel =
+        document.createElement("span");
+
+      rankLabel.className =
+        "coordinate rank";
+
+      rankLabel.textContent = square[1];
+
+      element.appendChild(rankLabel);
+    }
+
+    if (visualRank === 7) {
+      const fileLabel =
+        document.createElement("span");
+
+      fileLabel.className =
+        "coordinate file";
+
+      fileLabel.textContent = square[0];
+
+      element.appendChild(fileLabel);
     }
   }
 
@@ -460,7 +383,10 @@
       return;
     }
 
-    if (aiEnabled && game.turn() === "b") {
+    if (
+      aiEnabled &&
+      game.turn() === "b"
+    ) {
       return;
     }
 
@@ -485,34 +411,16 @@
       return;
     }
 
-    const move = game.move({
-      from: selectedSquare,
-      to: square,
-      promotion: "q",
-    });
-
-    clearSelection();
-
-    if (!move) {
-      renderBoard();
-      return;
-    }
-
-    render();
-
-    if (
-      aiEnabled &&
-      !game.game_over() &&
-      game.turn() === "b"
-    ) {
-      requestAiMove();
-    }
+    attemptPlayerMove(
+      selectedSquare,
+      square
+    );
   }
 
   function selectSquare(square) {
     selectedSquare = square;
 
-    legalTargets = game.moves({
+    legalMoves = game.moves({
       square,
       verbose: true,
     });
@@ -522,43 +430,144 @@
 
   function clearSelection() {
     selectedSquare = null;
-    legalTargets = [];
+    legalMoves = [];
   }
 
-  function renderStatus() {
-    const status =
+  function attemptPlayerMove(from, to) {
+    const possibleMoves = game.moves({
+      square: from,
+      verbose: true,
+    });
+
+    const requestedMove = possibleMoves.find(
+      (move) => move.to === to
+    );
+
+    if (!requestedMove) {
+      clearSelection();
+      renderBoard();
+      return;
+    }
+
+    let promotionPiece = "q";
+
+    if (
+      requestedMove.flags.includes("p")
+    ) {
+      promotionPiece =
+        choosePromotionPiece();
+    }
+
+    const move = game.move({
+      from,
+      to,
+      promotion: promotionPiece,
+    });
+
+    clearSelection();
+
+    if (!move) {
+      renderBoard();
+      return;
+    }
+
+    renderEverything();
+
+    if (
+      aiEnabled &&
+      !game.game_over() &&
+      game.turn() === "b"
+    ) {
+      requestComputerMove();
+    }
+  }
+
+  function choosePromotionPiece() {
+    const answer = window.prompt(
+      "Promote pawn to: q, r, b or n",
+      "q"
+    );
+
+    const value =
+      String(answer || "q")
+        .trim()
+        .toLowerCase();
+
+    if (
+      ["q", "r", "b", "n"].includes(value)
+    ) {
+      return value;
+    }
+
+    return "q";
+  }
+
+  function renderGameStatus() {
+    const statusElement =
       document.getElementById("gameStatus");
 
-    if (!status) {
+    if (!statusElement) {
       return;
     }
 
     if (game.in_checkmate()) {
-      status.textContent =
+      const winner =
         game.turn() === "w"
-          ? "Checkmate — Black wins"
-          : "Checkmate — White wins";
-    } else if (game.in_stalemate()) {
-      status.textContent = "Draw by stalemate";
-    } else if (game.in_threefold_repetition()) {
-      status.textContent =
-        "Draw by threefold repetition";
-    } else if (game.insufficient_material()) {
-      status.textContent =
-        "Draw by insufficient material";
-    } else if (game.in_draw()) {
-      status.textContent = "Draw";
-    } else {
-      const player =
-        game.turn() === "w" ? "White" : "Black";
+          ? "Black"
+          : "White";
 
-      status.textContent =
-        `${player} to move` +
-        `${game.in_check() ? " — Check!" : ""}`;
+      statusElement.textContent =
+        `Checkmate — ${winner} wins`;
+
+      return;
     }
+
+    if (game.in_stalemate()) {
+      statusElement.textContent =
+        "Draw by stalemate";
+
+      return;
+    }
+
+    if (game.in_threefold_repetition()) {
+      statusElement.textContent =
+        "Draw by threefold repetition";
+
+      return;
+    }
+
+    if (game.insufficient_material()) {
+      statusElement.textContent =
+        "Draw by insufficient material";
+
+      return;
+    }
+
+    if (game.in_draw()) {
+      statusElement.textContent = "Draw";
+      return;
+    }
+
+    const player =
+      game.turn() === "w"
+        ? "White"
+        : "Black";
+
+    const checkMessage =
+      game.in_check()
+        ? " — Check!"
+        : "";
+
+    const thinkingMessage =
+      aiThinking
+        ? " — Computer thinking..."
+        : "";
+
+    statusElement.textContent =
+      `${player} to move${checkMessage}${thinkingMessage}`;
   }
 
-  function renderHistory() {
+  function renderMoveHistory() {
     const historyElement =
       document.getElementById("moveHistory");
 
@@ -568,32 +577,61 @@
 
     const moves = game.history();
 
-    if (!moves.length) {
-      historyElement.textContent = "No moves yet";
+    if (moves.length === 0) {
+      historyElement.textContent =
+        "No moves yet";
+
       return;
     }
 
     const rows = [];
 
-    for (let i = 0; i < moves.length; i += 2) {
+    for (
+      let index = 0;
+      index < moves.length;
+      index += 2
+    ) {
+      const whiteMove =
+        moves[index] || "";
+
+      const blackMove =
+        moves[index + 1] || "";
+
       rows.push(`
         <div>
-          <strong>${i / 2 + 1}.</strong>
-          ${moves[i] || ""}
-          ${moves[i + 1] || ""}
+          <strong>
+            ${index / 2 + 1}.
+          </strong>
+
+          <span>
+            ${escapeHtml(whiteMove)}
+          </span>
+
+          <span>
+            ${escapeHtml(blackMove)}
+          </span>
         </div>
       `);
     }
 
-    historyElement.innerHTML = rows.join("");
+    historyElement.innerHTML =
+      rows.join("");
+
     historyElement.scrollTop =
       historyElement.scrollHeight;
   }
 
-  function newGame() {
-    if (stockfish && pendingEngineMove) {
-      stockfish.postMessage("stop");
-    }
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function startNewGame() {
+    stopStockfishSearch();
 
     game.reset();
 
@@ -601,7 +639,9 @@
     pendingEngineMove = false;
 
     clearSelection();
-    render();
+    renderEverything();
+
+    updateEngineStatus();
   }
 
   function undoMove() {
@@ -609,10 +649,17 @@
       return;
     }
 
+    if (game.history().length === 0) {
+      return;
+    }
+
     if (aiEnabled) {
       game.undo();
 
-      if (game.turn() === "b") {
+      if (
+        game.history().length > 0 &&
+        game.turn() === "b"
+      ) {
         game.undo();
       }
     } else {
@@ -620,113 +667,190 @@
     }
 
     clearSelection();
-    render();
+    renderEverything();
+  }
+
+  function flipBoard() {
+    boardFlipped = !boardFlipped;
+
+    renderBoard();
   }
 
   async function copyPgn() {
-    const pgn = game.pgn() || "No moves played.";
+    const pgn =
+      game.pgn() || "No moves played.";
+
+    const button =
+      document.getElementById(
+        "copyPgnButton"
+      );
 
     try {
-      await navigator.clipboard.writeText(pgn);
+      await navigator.clipboard.writeText(
+        pgn
+      );
 
-      const button =
-        document.getElementById("copyPgn");
-
-      const original = button.textContent;
+      const previousText =
+        button.textContent;
 
       button.textContent = "Copied!";
 
-      setTimeout(() => {
-        button.textContent = original;
+      window.setTimeout(() => {
+        button.textContent =
+          previousText;
       }, 1200);
-    } catch {
-      window.prompt("Copy this PGN:", pgn);
+    } catch (error) {
+      window.prompt(
+        "Copy the PGN below:",
+        pgn
+      );
     }
   }
 
   function initializeStockfish() {
     const engineStatus =
-      document.getElementById("engineStatus");
+      document.getElementById(
+        "engineStatus"
+      );
 
     try {
-      stockfish = new Worker(STOCKFISH_PATH);
+      stockfish =
+        new Worker(STOCKFISH_FILE);
 
-      stockfish.onmessage = (event) => {
-        const line =
-          typeof event.data === "string"
-            ? event.data
-            : String(event.data);
+      stockfish.onmessage =
+        handleStockfishMessage;
 
-        if (line === "uciok") {
-          stockfish.postMessage("isready");
-        } else if (line === "readyok") {
-          stockfishReady = true;
-          configureStockfish();
+      stockfish.onerror = (error) => {
+        console.warn(
+          "Stockfish could not load:",
+          error
+        );
 
-          engineStatus.textContent =
-            "Stockfish ready";
-        } else if (line.startsWith("bestmove")) {
-          handleBestMove(line);
-        }
-      };
-
-      stockfish.onerror = () => {
         stockfishReady = false;
 
         engineStatus.textContent =
-          "Stockfish files missing — using backup AI";
+          "Stockfish unavailable — backup AI active";
       };
 
       stockfish.postMessage("uci");
     } catch (error) {
       console.warn(
-        "Stockfish could not start:",
+        "Stockfish worker failed:",
         error
       );
 
       stockfishReady = false;
 
       engineStatus.textContent =
-        "Using backup AI";
+        "Backup AI active";
+    }
+  }
+
+  function handleStockfishMessage(event) {
+    const response =
+      typeof event.data === "string"
+        ? event.data
+        : String(event.data);
+
+    if (response === "uciok") {
+      stockfish.postMessage("isready");
+      return;
+    }
+
+    if (response === "readyok") {
+      stockfishReady = true;
+
+      configureStockfish();
+      updateEngineStatus();
+
+      return;
+    }
+
+    if (
+      response.startsWith("bestmove")
+    ) {
+      handleStockfishBestMove(response);
     }
   }
 
   function configureStockfish() {
-    if (!stockfish) {
+    if (
+      !stockfish ||
+      !stockfishReady
+    ) {
       return;
     }
 
-    const depth = Number(
-      document.getElementById("difficulty").value
-    );
+    const selectedDepth =
+      Number(
+        document.getElementById(
+          "difficulty"
+        ).value
+      );
 
-    const skill = Math.max(
+    const skillLevel = Math.max(
       0,
-      Math.min(20, Math.round(depth * 1.3))
+      Math.min(
+        20,
+        Math.round(selectedDepth * 1.15)
+      )
     );
 
     stockfish.postMessage(
-      `setoption name Skill Level value ${skill}`
+      `setoption name Skill Level value ${skillLevel}`
     );
+
+    stockfish.postMessage(
+      "setoption name Hash value 32"
+    );
+
+    stockfish.postMessage("isready");
   }
 
-  function requestAiMove() {
+  function updateEngineStatus() {
+    const engineStatus =
+      document.getElementById(
+        "engineStatus"
+      );
+
+    if (!engineStatus) {
+      return;
+    }
+
+    if (stockfishReady) {
+      engineStatus.textContent =
+        "Stockfish 18 ready";
+    } else {
+      engineStatus.textContent =
+        "Backup AI active";
+    }
+  }
+
+  function requestComputerMove() {
     aiThinking = true;
-    renderStatus();
+
+    renderGameStatus();
 
     const engineStatus =
-      document.getElementById("engineStatus");
+      document.getElementById(
+        "engineStatus"
+      );
 
-    engineStatus.textContent = stockfishReady
-      ? "Stockfish is thinking..."
-      : "Backup AI is thinking...";
-
-    if (stockfishReady && stockfish) {
+    if (
+      stockfishReady &&
+      stockfish
+    ) {
       pendingEngineMove = true;
 
-      const depth = Number(
-        document.getElementById("difficulty").value
-      );
+      const depth =
+        Number(
+          document.getElementById(
+            "difficulty"
+          ).value
+        );
+
+      engineStatus.textContent =
+        "Stockfish is thinking...";
 
       stockfish.postMessage(
         `position fen ${game.fen()}`
@@ -735,36 +859,56 @@
       stockfish.postMessage(
         `go depth ${depth}`
       );
-    } else {
-      window.setTimeout(
-        makeBackupAiMove,
-        350
-      );
+
+      return;
     }
+
+    engineStatus.textContent =
+      "Backup AI is thinking...";
+
+    window.setTimeout(
+      makeBackupComputerMove,
+      350
+    );
   }
 
-  function handleBestMove(line) {
+  function stopStockfishSearch() {
+    if (
+      stockfish &&
+      pendingEngineMove
+    ) {
+      stockfish.postMessage("stop");
+    }
+
+    pendingEngineMove = false;
+  }
+
+  function handleStockfishBestMove(
+    response
+  ) {
     if (!pendingEngineMove) {
       return;
     }
 
     pendingEngineMove = false;
 
-    const moveText = line.split(" ")[1];
+    const moveText =
+      response.split(" ")[1];
 
     if (
       !moveText ||
       moveText === "(none)"
     ) {
       aiThinking = false;
-      render();
+      renderEverything();
       return;
     }
 
     const move = game.move({
       from: moveText.slice(0, 2),
       to: moveText.slice(2, 4),
-      promotion: moveText[4] || "q",
+      promotion:
+        moveText.slice(4, 5) || "q",
     });
 
     aiThinking = false;
@@ -775,29 +919,26 @@
         moveText
       );
 
-      makeBackupAiMove();
+      makeBackupComputerMove();
       return;
     }
 
-    document.getElementById(
-      "engineStatus"
-    ).textContent = "Stockfish ready";
-
-    render();
+    updateEngineStatus();
+    renderEverything();
   }
 
-  function makeBackupAiMove() {
-    const moves = game.moves({
+  function makeBackupComputerMove() {
+    const possibleMoves = game.moves({
       verbose: true,
     });
 
-    if (!moves.length) {
+    if (possibleMoves.length === 0) {
       aiThinking = false;
-      render();
+      renderEverything();
       return;
     }
 
-    const values = {
+    const pieceValues = {
       p: 100,
       n: 320,
       b: 330,
@@ -806,58 +947,77 @@
       k: 20000,
     };
 
-    let bestScore = -Infinity;
+    let highestScore = -Infinity;
     let bestMoves = [];
 
-    for (const move of moves) {
-      let score = Math.random() * 25;
+    for (
+      const candidateMove
+      of possibleMoves
+    ) {
+      let score =
+        Math.random() * 20;
 
-      if (move.captured) {
-        score += values[move.captured] || 0;
+      if (candidateMove.captured) {
+        score +=
+          pieceValues[
+            candidateMove.captured
+          ] || 0;
       }
 
-      if (move.promotion) {
-        score += values[move.promotion] || 0;
+      if (candidateMove.promotion) {
+        score +=
+          pieceValues[
+            candidateMove.promotion
+          ] || 0;
       }
 
       if (
-        move.flags.includes("k") ||
-        move.flags.includes("q")
+        candidateMove.flags.includes("k") ||
+        candidateMove.flags.includes("q")
       ) {
-        score += 45;
+        score += 50;
       }
 
-      game.move(move);
+      game.move(candidateMove);
 
       if (game.in_checkmate()) {
         score += 100000;
       } else if (game.in_check()) {
-        score += 55;
+        score += 70;
+      }
+
+      const movedPiece =
+        game.get(candidateMove.to);
+
+      if (movedPiece) {
+        score +=
+          evaluateSquarePosition(
+            candidateMove.to,
+            movedPiece.type
+          );
       }
 
       game.undo();
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestMoves = [move];
-      } else if (score === bestScore) {
-        bestMoves.push(move);
+      if (score > highestScore) {
+        highestScore = score;
+        bestMoves = [candidateMove];
+      } else if (
+        score === highestScore
+      ) {
+        bestMoves.push(candidateMove);
       }
     }
 
-    const chosen =
+    const selectedMove =
       bestMoves[
         Math.floor(
-          Math.random() * bestMoves.length
-        )
-      ] ||
-      moves[
-        Math.floor(
-          Math.random() * moves.length
+          Math.random() *
+          bestMoves.length
         )
       ];
 
-    game.move(chosen);
+    game.move(selectedMove);
 
     aiThinking = false;
 
@@ -866,8 +1026,53 @@
     ).textContent =
       "Backup AI active — add Stockfish files for stronger play";
 
-    render();
+    renderEverything();
   }
 
-  start();
+  function evaluateSquarePosition(
+    square,
+    pieceType
+  ) {
+    const centerSquares = [
+      "d4",
+      "e4",
+      "d5",
+      "e5",
+    ];
+
+    const nearCenterSquares = [
+      "c3",
+      "d3",
+      "e3",
+      "f3",
+      "c4",
+      "f4",
+      "c5",
+      "f5",
+      "c6",
+      "d6",
+      "e6",
+      "f6",
+    ];
+
+    if (
+      centerSquares.includes(square)
+    ) {
+      return pieceType === "k"
+        ? -10
+        : 25;
+    }
+
+    if (
+      nearCenterSquares.includes(square)
+    ) {
+      return pieceType === "k"
+        ? -5
+        : 12;
+    }
+
+    return 0;
+  }
+
+  initializeGame();
 })();
